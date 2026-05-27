@@ -27,6 +27,16 @@ object WidgetAttachment {
         val contents = runCatching { twm.toolWindow.contentManager.contents.toList() }.getOrNull() ?: return false
         if (contents.isEmpty()) return false
 
+        // 清理 stale entry：registry 里有些 widgetRef 指向已关闭的 Content
+        // 这些 entry 会让 fallback "first unattached" 算法误判全占
+        val currentContentSet: Set<Any> = contents.toSet()
+        registry.snapshot().forEach { entry ->
+            val ref = entry.widgetRef ?: return@forEach
+            if (ref is Content && ref !in currentContentSet) {
+                registry.attachWidget(entry.uuid, null as Any?)
+            }
+        }
+
         // 算法 1：逐 content 反射 PID → ps eww 读 env → 精确匹配
         var anyPidReadable = false
         for (content in contents) {
