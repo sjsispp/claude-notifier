@@ -1,10 +1,13 @@
 import Cocoa
 import SwiftUI
+import Combine
 
 final class FloatingPanelController {
     private let panel: NSPanel
     private let store: NotificationStore
     private weak var router: TerminalRouter?
+    private var cancellables: Set<AnyCancellable> = []
+    private var lastCount: Int = 0
 
     init(store: NotificationStore, router: TerminalRouter) {
         self.store = store
@@ -30,6 +33,8 @@ final class FloatingPanelController {
                                                   onJump: { [weak self] in await self?.handleJump($0) },
                                                   onDismiss: { [weak self] in self?.store.remove(id: $0) })
         panel.contentView = NSHostingView(rootView: view)
+
+        subscribeForAutoBehavior()
     }
 
     func show() {
@@ -52,6 +57,23 @@ final class FloatingPanelController {
         let x = v.maxX - size.width - 12
         let y = v.maxY - size.height - 12
         panel.setFrameOrigin(NSPoint(x: x, y: y))
+    }
+
+    private func subscribeForAutoBehavior() {
+        store.$items
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] items in
+                guard let self else { return }
+                let newCount = items.count
+                defer { self.lastCount = newCount }
+                if newCount > self.lastCount {
+                    SoundPlayer.playNewEventSound()
+                    if !self.panel.isVisible { self.show() }
+                } else if newCount == 0 && self.panel.isVisible {
+                    self.hide()
+                }
+            }
+            .store(in: &cancellables)
     }
 
     private func handleApprove(_ item: NotificationItem) async {
