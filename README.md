@@ -19,14 +19,21 @@ swift test        # 跑测试
 swift run ClaudeNotifier  # 启动（菜单栏出现 🔔）
 ```
 
-## 当前能力（Plan A 完成后）
+## 当前能力
 
-- ✅ 接收 CC hook（POST :6789/hook）
-- ✅ 菜单栏徽标 + 屏幕右上常驻浮窗
-- ✅ iTerm 跳转 + 同意（100% 可靠）
-- ✅ VS Code 跳转（同意暂不支持）
-- ⏳ IDEA：等 Plan C（当前 stub，会提示"未检测到 IDEA plugin"）
-- ⏳ CC plugin：等 Plan B（当前需手动改 ~/.claude/settings.json）
+- ✅ Plan A：菜单栏 App + iTerm 完整闭环
+- ✅ Plan B：CC plugin（hook 脚本 + slash command）—— CC 事件自动推送到 App
+- ⏳ Plan C：IDEA plugin —— IDEA 终端的同意/跳转 100% 可靠（当前 stub）
+
+## 三件套安装
+
+1. **macOS App**：`cd app && swift run ClaudeNotifier`（或后续打包成 .app）
+2. **CC plugin**：`/plugin install claude-notifier` 或手动 symlink
+3. **IDEA plugin**：等 Plan C
+
+详见：
+- App 开发：`app/README.md`（如有）或 `docs/manual-test-checklist.md`
+- CC plugin：`cc-plugin/README.md`
 
 ## 设计文档
 
