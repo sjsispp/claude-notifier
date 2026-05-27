@@ -1,0 +1,25 @@
+<idea-plugin>
+    <id>io.claudenotifier.idea</id>
+    <name>Claude Notifier</name>
+    <vendor email="wudazhan@local" url="https://github.com/wudazhan/claude-notifier">wudazhan</vendor>
+
+    <description><![CDATA[
+        把 IntelliJ 终端的 Claude Code 事件精准送到 ClaudeNotifier.app 浮窗。
+        <br/>
+        新终端 tab 注入 CLAUDE_IDEA_TAB_ID 环境变量；本地 HTTP 服务（:6790）
+        让 App 能 100% 可靠地 sendText / focusTab，无焦点依赖。
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>org.jetbrains.plugins.terminal</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <postStartupActivity implementation="io.claudenotifier.idea.ClaudeNotifierStartupActivity"/>
+    </extensions>
+
+    <extensions defaultExtensionNs="org.jetbrains.plugins.terminal">
+        <localTerminalCustomizer implementation="io.claudenotifier.idea.TerminalEnvCustomizer"/>
+    </extensions>
+
+    <applicationListeners/>
+</idea-plugin>
