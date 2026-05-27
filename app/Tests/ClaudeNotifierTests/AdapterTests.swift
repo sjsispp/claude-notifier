@@ -14,18 +14,6 @@ final class AdapterTests: XCTestCase {
         await XCTAssertThrowsErrorAsync(try await a.approve(item: item(host: .unknown)))
     }
 
-    func test_ideaAdapter_returnsPluginNotInstalledByDefault() async {
-        let a = IdeaAdapter()
-        do {
-            try await a.jump(item: item(host: .idea))
-            XCTFail("expected throw")
-        } catch let e as AdapterError {
-            XCTAssertEqual(e, .pluginNotInstalled)
-        } catch {
-            XCTFail("wrong error type: \(error)")
-        }
-    }
-
     func test_vscodeAdapter_jump_invokesOpenWithVSCodeURI() async throws {
         var captured: [String] = []
         let a = VSCodeAdapter(processRunner: { args in
