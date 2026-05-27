@@ -5,8 +5,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpHandler
-import com.intellij.openapi.project.ProjectManager
-import io.claudenotifier.idea.TerminalTabRegistry
+import io.claudenotifier.idea.ContentFinder
 import io.claudenotifier.idea.WidgetAttachment
 import org.jetbrains.plugins.terminal.TerminalToolWindowManager
 
@@ -32,35 +31,22 @@ class SendTextHandler : HttpHandler {
         val tabId = req.tabId ?: run { respond(exchange, 400, Response(false, "missing tabId")); return }
         val text = req.text ?: run { respond(exchange, 400, Response(false, "missing text")); return }
 
-        val registry = ApplicationManager.getApplication().getService(TerminalTabRegistry::class.java)
-        val entry = registry.lookup(tabId) ?: run {
-            respond(exchange, 410, Response(false, "tabId not registered"))
+        // PID-based 全局查找
+        val match = ContentFinder.findByUuid(tabId)
+        if (match == null) {
+            respond(exchange, 410, Response(false, "no terminal process has CLAUDE_IDEA_TAB_ID=$tabId (tab closed?)"))
             return
-        }
-
-        // 找 project，方便 lazy-attach 和 Content -> Widget 转换
-        val project = ProjectManager.getInstance().openProjects.firstOrNull {
-            it.basePath == entry.projectPath || it.name == entry.projectName
-        } ?: run {
-            respond(exchange, 410, Response(false, "project closed")); return
         }
 
         var sent = false
         var lastError: String? = null
         ApplicationManager.getApplication().invokeAndWait {
-            var widgetRef = registry.lookup(tabId)?.widgetRef
-            if (widgetRef == null) {
-                WidgetAttachment.tryAttachByContent(project, tabId)
-                widgetRef = registry.lookup(tabId)?.widgetRef
-            }
-            if (widgetRef == null) {
-                lastError = "widget not attached (tab may have been created before plugin loaded)"
+            val twm = TerminalToolWindowManager.getInstance(match.project)
+            val widget = WidgetAttachment.resolveWidget(match.content, twm) ?: run {
+                lastError = "cannot resolve widget from content"
                 return@invokeAndWait
             }
-            // Content -> Widget 转换（如果 widgetRef 是 Content）
-            val twm = TerminalToolWindowManager.getInstance(project)
-            val actualTarget = WidgetAttachment.resolveWidget(widgetRef, twm) ?: widgetRef
-            sent = trySendText(actualTarget, text) { lastError = it }
+            sent = trySendText(widget, text) { lastError = it }
         }
 
         if (sent) respond(exchange, 200, Response(true))
@@ -71,7 +57,6 @@ class SendTextHandler : HttpHandler {
     private fun trySendText(widgetRef: Any, text: String, errorSink: (String) -> Unit): Boolean {
         val cleanText = text.trimEnd('\n')
 
-        // 路径 1: 反射调任何 widget 的 sendCommandToExecute(String)
         runCatching {
             val m = widgetRef.javaClass.methods.firstOrNull {
                 it.name == "sendCommandToExecute" && it.parameterCount == 1 &&
@@ -81,22 +66,19 @@ class SendTextHandler : HttpHandler {
                 m.invoke(widgetRef, cleanText)
                 return true
             }
-        }.onFailure { log.warn("sendCommandToExecute reflective call failed: ${it.message}") }
+        }.onFailure { log.warn("sendCommandToExecute failed: ${it.message}") }
 
-        // 路径 2: 反射拿 ttyConnector 写字符
         runCatching {
             val ttyMethod = widgetRef.javaClass.methods.firstOrNull {
                 it.name == "getTtyConnector" && it.parameterCount == 0
             }
             val ttyConnector = ttyMethod?.invoke(widgetRef) ?: return@runCatching
-            // 优先 String 形式
             ttyConnector.javaClass.methods.firstOrNull {
                 it.name == "write" && it.parameterCount == 1 && it.parameterTypes[0] == String::class.java
             }?.let {
                 it.invoke(ttyConnector, cleanText + "\n")
                 return true
             }
-            // ByteArray 形式
             ttyConnector.javaClass.methods.firstOrNull {
                 it.name == "write" && it.parameterCount == 1 && it.parameterTypes[0] == ByteArray::class.java
             }?.let {

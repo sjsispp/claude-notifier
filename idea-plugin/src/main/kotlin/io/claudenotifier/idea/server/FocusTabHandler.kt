@@ -3,14 +3,11 @@ package io.claudenotifier.idea.server
 import com.google.gson.Gson
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.wm.WindowManager
-import com.intellij.ui.content.Content
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpHandler
+import io.claudenotifier.idea.ContentFinder
 import io.claudenotifier.idea.IdeActivator
-import io.claudenotifier.idea.TerminalTabRegistry
-import io.claudenotifier.idea.WidgetAttachment
 import org.jetbrains.plugins.terminal.TerminalToolWindowManager
 
 class FocusTabHandler : HttpHandler {
@@ -32,70 +29,30 @@ class FocusTabHandler : HttpHandler {
         }
 
         val tabId = req.tabId ?: run { respond(exchange, 400, Response(false, "missing tabId")); return }
-        val registry = ApplicationManager.getApplication().getService(TerminalTabRegistry::class.java)
-        val entry = registry.lookup(tabId) ?: run {
-            respond(exchange, 410, Response(false, "tabId not registered")); return
+
+        // PID-based 全局查找：不依赖 registry，扫所有 open project 的 content
+        val match = ContentFinder.findByUuid(tabId)
+        if (match == null) {
+            respond(exchange, 410, Response(false, "no terminal process has CLAUDE_IDEA_TAB_ID=$tabId (tab closed?)"))
+            return
         }
 
-        val project = ProjectManager.getInstance().openProjects.firstOrNull {
-            it.basePath == entry.projectPath || it.name == entry.projectName
-        } ?: run {
-            respond(exchange, 410, Response(false, "project closed")); return
-        }
-
-        // 关键：先 fork osascript activate IDE app —— Java JVM 后台进程的
-        // frame.toFront() 在 macOS 上被焦点抢占保护拦截。osascript 是高层
-        // 用户动作，可以绕过限制把 IDE 窗口拉到前台。
+        // 先 osascript 激活 IDE app（绕过 macOS 焦点抢占保护）
         IdeActivator.activateIdeApp()
 
-        var ok = false
         ApplicationManager.getApplication().invokeAndWait {
-            // 1. 提升 IDE 窗口（osascript 主力，这里是兜底）
-            val frame = WindowManager.getInstance().getFrame(project)
+            // 提升对应 project 的窗口
+            val frame = WindowManager.getInstance().getFrame(match.project)
             frame?.toFront()
             frame?.requestFocus()
 
-            // 2. 显示 Terminal tool window
-            val twm = TerminalToolWindowManager.getInstance(project)
+            // 显示 Terminal tool window 并选中目标 content
+            val twm = TerminalToolWindowManager.getInstance(match.project)
             twm.toolWindow.show {}
-
-            // 3. 选中匹配的 tab —— 通过 registry 拿 widgetRef；若没拿到，立刻 lazy-attach 一次
-            var widgetRef = registry.lookup(tabId)?.widgetRef
-            if (widgetRef == null) {
-                WidgetAttachment.tryAttachByContent(project, tabId)
-                widgetRef = registry.lookup(tabId)?.widgetRef
-            }
-            val targetContent: Content? = findContent(widgetRef, twm)
-
-            if (targetContent != null && twm.toolWindow.contentManager.contents.contains(targetContent)) {
-                twm.toolWindow.contentManager.setSelectedContent(targetContent, true)
-                ok = true
-            } else {
-                // 兜底：只激活 tool window，无法精准选中具体 tab
-                log.info("[ClaudeNotifier] focusTab: widget not yet attached (uuid=$tabId), tool window activated only")
-                ok = true
-            }
+            twm.toolWindow.contentManager.setSelectedContent(match.content, true)
         }
 
-        if (ok) respond(exchange, 200, Response(true))
-        else respond(exchange, 500, Response(false, "focus failed"))
-    }
-
-    /** 反射方式查找 widgetRef 对应的 Content（避免直接 import 不稳定的 widget 类型） */
-    private fun findContent(widgetRef: Any?, twm: TerminalToolWindowManager): Content? {
-        if (widgetRef == null) return null
-        if (widgetRef is Content) return widgetRef
-        // 反射尝试 twm.getContainer(widget).getContent()
-        return runCatching {
-            val getContainer = twm.javaClass.methods.firstOrNull {
-                it.name == "getContainer" && it.parameterCount == 1
-            } ?: return@runCatching null
-            val container = getContainer.invoke(twm, widgetRef) ?: return@runCatching null
-            val getContent = container.javaClass.methods.firstOrNull {
-                it.name == "getContent" && it.parameterCount == 0
-            } ?: return@runCatching null
-            getContent.invoke(container) as? Content
-        }.getOrNull()
+        respond(exchange, 200, Response(true))
     }
 
     private fun respond(exchange: HttpExchange, code: Int, body: Response) {
