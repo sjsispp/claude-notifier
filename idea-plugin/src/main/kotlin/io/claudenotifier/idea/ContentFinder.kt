@@ -48,42 +48,79 @@ object ContentFinder {
     fun extractPidFromContent(content: Content, twm: TerminalToolWindowManager): Long? {
         diag(content, twm)
 
-        // 路径 A1: findWidgetByContent（新 API，return TerminalWidget interface，支持 reworked）
-        runCatching {
-            val m = twm.javaClass.methods.firstOrNull {
-                it.name == "findWidgetByContent" && it.parameterCount == 1
-            }
-            val widget = m?.invoke(twm, content)
-            if (widget != null) {
-                diagWidget(widget)
-                PidEnvLookup.extractPid(widget)?.let { return it }
-            }
-        }
-
-        // 路径 A2: getWidgetByContent（旧 API，可能返回 null 对 reworked widget）
-        runCatching {
-            val m = twm.javaClass.methods.firstOrNull {
-                it.name == "getWidgetByContent" && it.parameterCount == 1
-            }
-            val widget = m?.invoke(twm, content)
-            if (widget != null) {
-                PidEnvLookup.extractPid(widget)?.let { return it }
+        // 路径 A1/A2: findWidgetByContent / getWidgetByContent（reworked 都返回 null，但还是 try）
+        for (methodName in listOf("findWidgetByContent", "getWidgetByContent")) {
+            runCatching {
+                val m = twm.javaClass.methods.firstOrNull {
+                    it.name == methodName && it.parameterCount == 1
+                }
+                val widget = m?.invoke(twm, content)
+                if (widget != null) {
+                    diagWidget(widget)
+                    PidEnvLookup.extractPid(widget)?.let { return it }
+                }
             }
         }
 
-        // 路径 B: content.component
+        // 路径 B: content.component 是 TerminalToolWindowPanel，递归扫它的整个 swing 子树
         val comp = content.component
         if (comp != null) {
-            PidEnvLookup.extractPid(comp)?.let { return it }
-        }
-
-        // 路径 C: content.preferredFocusableComponent
-        val pfc = runCatching { content.preferredFocusableComponent }.getOrNull()
-        if (pfc != null && pfc !== comp) {
-            PidEnvLookup.extractPid(pfc)?.let { return it }
+            walkComponentTree(comp, depth = 0)?.let { return it }
         }
 
         return null
+    }
+
+    /** 递归扫 swing 组件树，对每个 component 试 extractPid */
+    private fun walkComponentTree(comp: Any, depth: Int): Long? {
+        if (depth > 6) return null
+
+        // 一次性 log 树形结构（每种 class 只打一次）
+        diagTreeNode(comp, depth)
+
+        // 试这个 component 本身
+        PidEnvLookup.extractPid(comp)?.let { return it }
+
+        // 递归子组件
+        if (comp is java.awt.Container) {
+            try {
+                for (child in comp.components) {
+                    walkComponentTree(child, depth + 1)?.let { return it }
+                }
+            } catch (_: Throwable) {}
+        }
+
+        // 也试 component 上叫 getXxx 的方法（widget 可能挂在 panel 的某个 service 字段上）
+        for (m in comp.javaClass.methods) {
+            if (m.parameterCount != 0) continue
+            val name = m.name
+            // 只查可能持有 widget / session 的 getter
+            if (name !in setOf("getTerminalWidget", "getWidget", "getSession",
+                    "getTerminalSession", "getModel", "getController", "getPanel",
+                    "getTerminalPanel", "getView", "getJBTerminalWidget")) continue
+            runCatching {
+                val v = m.invoke(comp) ?: return@runCatching
+                walkComponentTree(v, depth + 1)?.let { return it }
+            }
+        }
+        return null
+    }
+
+    @Volatile private var diagTreeDone: MutableSet<String> = mutableSetOf()
+
+    private fun diagTreeNode(obj: Any, depth: Int) {
+        val cls = obj.javaClass.name
+        // 优先 log terminal 相关的
+        if (cls.contains("erminal", ignoreCase = false) || cls.contains("Jedi", ignoreCase = false) || cls.contains("Block", ignoreCase = false)) {
+            if (diagTreeDone.add(cls)) {
+                val indent = "  ".repeat(depth)
+                val methodNames = obj.javaClass.methods
+                    .filter { it.parameterCount == 0 && it.returnType != Void.TYPE }
+                    .map { "${it.name}:${it.returnType.simpleName}" }
+                    .sorted().take(40).joinToString(", ")
+                log.info("[ClaudeNotifier] TREE depth=$depth ${indent}cls=$cls methods=[$methodNames]")
+            }
+        }
     }
 
     @Volatile private var diagWidgetDone: MutableSet<String> = mutableSetOf()
