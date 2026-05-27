@@ -35,7 +35,7 @@ class TerminalTabRegistry {
 
     fun snapshot(): List<TerminalTabEntry> = entries.values.toList()
 
-    fun attachWidget(uuid: String, widget: Any) {
+    fun attachWidget(uuid: String, widget: Any?) {
         entries[uuid]?.widgetRef = widget
     }
 }
