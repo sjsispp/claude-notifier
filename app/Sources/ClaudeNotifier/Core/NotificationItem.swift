@@ -13,6 +13,7 @@ struct NotificationItem: Identifiable, Equatable {
     let itermSessionId: String?
     let ideaTabId: String?
     let timestamp: Int
+    var lastError: String? = nil
 
     init(payload: HookPayload, id: UUID = UUID()) {
         self.id = id

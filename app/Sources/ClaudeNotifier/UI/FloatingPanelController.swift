@@ -80,14 +80,36 @@ final class FloatingPanelController {
     private func handleApprove(_ item: NotificationItem) async {
         do {
             try await router?.approve(item: item)
-            await MainActor.run { store.remove(id: item.id) }
+            await MainActor.run {
+                store.setError(id: item.id, message: nil)
+                store.remove(id: item.id)
+            }
         } catch {
-            NSLog("[ClaudeNotifier] approve failed: \(error)")
+            await MainActor.run {
+                store.setError(id: item.id, message: friendlyMessage(error))
+            }
+            SoundPlayer.playNewEventSound()
         }
     }
 
     private func handleJump(_ item: NotificationItem) async {
-        do { try await router?.jump(item: item) }
-        catch { NSLog("[ClaudeNotifier] jump failed: \(error)") }
+        do {
+            try await router?.jump(item: item)
+            await MainActor.run { store.setError(id: item.id, message: nil) }
+        } catch {
+            await MainActor.run { store.setError(id: item.id, message: friendlyMessage(error)) }
+        }
+    }
+
+    private func friendlyMessage(_ error: Error) -> String {
+        if let e = error as? AdapterError {
+            switch e {
+            case .unsupported: return "当前终端不支持此操作"
+            case .targetNotFound: return "找不到对应的终端会话"
+            case .pluginNotInstalled: return "未检测到 IDEA plugin"
+            case .scriptError(let m): return "脚本错误: \(m)"
+            }
+        }
+        return error.localizedDescription
     }
 }

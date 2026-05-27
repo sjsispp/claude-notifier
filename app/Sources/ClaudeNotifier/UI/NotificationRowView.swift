@@ -28,6 +28,12 @@ struct NotificationRowView: View {
                     .padding(.horizontal, 6).padding(.vertical, 3)
                     .background(Color.black.opacity(0.05)).cornerRadius(3)
             }
+            if let err = item.lastError {
+                Text("⚠️ \(err)")
+                    .font(.caption2).foregroundColor(.red)
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Color.red.opacity(0.1)).cornerRadius(3)
+            }
             HStack(spacing: 6) {
                 if item.event == .notification && canApprove {
                     Button("✓ 同意") { onApprove() }
@@ -55,7 +61,8 @@ struct NotificationRowView: View {
         item.event == .notification ? .orange : .green
     }
     private var rowBackground: Color {
-        item.event == .notification ? Color.yellow.opacity(0.15) : Color.green.opacity(0.10)
+        if item.lastError != nil { return Color.red.opacity(0.10) }
+        return item.event == .notification ? Color.yellow.opacity(0.15) : Color.green.opacity(0.10)
     }
     private var relativeTime: String {
         let delta = Int(Date().timeIntervalSince1970) - item.timestamp

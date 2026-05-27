@@ -19,6 +19,12 @@ final class NotificationStore: ObservableObject {
         items.removeAll { $0.id == id }
     }
 
+    func setError(id: UUID, message: String?) {
+        if let idx = items.firstIndex(where: { $0.id == id }) {
+            items[idx].lastError = message
+        }
+    }
+
     func clear() {
         items.removeAll()
     }
