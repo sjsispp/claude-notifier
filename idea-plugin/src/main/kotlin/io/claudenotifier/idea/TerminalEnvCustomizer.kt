@@ -1,0 +1,27 @@
+package io.claudenotifier.idea
+
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.project.Project
+import org.jetbrains.plugins.terminal.LocalTerminalCustomizer
+
+/**
+ * 在每个新终端 tab 创建时注入 CLAUDE_IDEA_TAB_ID 环境变量。
+ * CC hook 脚本读取此变量识别"我在哪个 IDEA 终端"，回传给 ClaudeNotifier.app。
+ */
+class TerminalEnvCustomizer : LocalTerminalCustomizer() {
+
+    override fun customizeCommandAndEnvironment(
+        project: Project,
+        workingDirectory: String?,
+        command: Array<out String>,
+        envs: MutableMap<String, String>
+    ): Array<out String> {
+        val registry = ApplicationManager.getApplication().getService(TerminalTabRegistry::class.java)
+        val uuid = registry.register(
+            projectName = project.name,
+            projectPath = project.basePath ?: workingDirectory ?: ""
+        )
+        envs["CLAUDE_IDEA_TAB_ID"] = uuid
+        return command
+    }
+}
