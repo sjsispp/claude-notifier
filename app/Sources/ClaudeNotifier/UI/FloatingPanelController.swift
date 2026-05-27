@@ -68,7 +68,8 @@ final class FloatingPanelController {
                 defer { self.lastCount = newCount }
                 if newCount > self.lastCount {
                     SoundPlayer.playNewEventSound()
-                    if !self.panel.isVisible { self.show() }
+                    let autoShow = UserDefaults.standard.object(forKey: "autoShowEnabled") as? Bool ?? true
+                    if autoShow && !self.panel.isVisible { self.show() }
                 } else if newCount == 0 && self.panel.isVisible {
                     self.hide()
                 }

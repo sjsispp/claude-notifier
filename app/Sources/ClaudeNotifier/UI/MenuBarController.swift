@@ -7,6 +7,7 @@ final class MenuBarController {
     private var cancellables: Set<AnyCancellable> = []
 
     var onClick: (() -> Void)?
+    var onShowPreferences: (() -> Void)?
 
     init(store: NotificationStore) {
         self.store = store
@@ -20,7 +21,8 @@ final class MenuBarController {
         btn.image = NSImage(systemSymbolName: "bell", accessibilityDescription: "Claude Notifier")
         btn.image?.isTemplate = true
         btn.target = self
-        btn.action = #selector(handleClick)
+        btn.action = #selector(handleClick(_:))
+        btn.sendAction(on: [.leftMouseUp, .rightMouseUp])
         btn.title = ""
     }
 
@@ -38,7 +40,27 @@ final class MenuBarController {
         btn.title = count > 0 ? " \(count)" : ""
     }
 
-    @objc private func handleClick() {
-        onClick?()
+    @objc private func handleClick(_ sender: NSStatusBarButton) {
+        let event = NSApp.currentEvent
+        if event?.type == .rightMouseUp {
+            showContextMenu()
+        } else {
+            onClick?()
+        }
     }
+
+    private func showContextMenu() {
+        let menu = NSMenu()
+        menu.addItem(withTitle: "偏好设置…", action: #selector(handlePreferences), keyEquivalent: ",").target = self
+        menu.addItem(withTitle: "全部清空", action: #selector(handleClearAll), keyEquivalent: "").target = self
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "退出 ClaudeNotifier", action: #selector(handleQuit), keyEquivalent: "q").target = self
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
+    }
+
+    @objc private func handlePreferences() { onShowPreferences?() }
+    @objc private func handleClearAll() { store.clear() }
+    @objc private func handleQuit() { NSApp.terminate(nil) }
 }

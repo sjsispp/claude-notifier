@@ -1,4 +1,5 @@
 import Cocoa
+import SwiftUI
 
 @main
 final class ClaudeNotifierApp: NSObject, NSApplicationDelegate {
@@ -16,6 +17,7 @@ final class ClaudeNotifierApp: NSObject, NSApplicationDelegate {
     private var runtimeConfig: RuntimeConfig!
     private var router: TerminalRouter!
     private var floatingPanel: FloatingPanelController!
+    private var preferencesWindow: NSWindow!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         store = NotificationStore()
@@ -46,5 +48,21 @@ final class ClaudeNotifierApp: NSObject, NSApplicationDelegate {
         let panel = FloatingPanelController(store: store, router: self.router)
         menuBar.onClick = { panel.toggle() }
         self.floatingPanel = panel
+
+        let prefsPanel = createPreferencesWindow(port: port)
+        self.preferencesWindow = prefsPanel
+        menuBar.onShowPreferences = {
+            prefsPanel.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    private func createPreferencesWindow(port: Int) -> NSWindow {
+        let host = NSHostingController(rootView: PreferencesView(currentPort: port))
+        let win = NSWindow(contentViewController: host)
+        win.title = "Claude Notifier 偏好"
+        win.styleMask = [.titled, .closable]
+        win.isReleasedWhenClosed = false
+        return win
     }
 }
