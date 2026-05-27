@@ -44,23 +44,34 @@ object ContentFinder {
         return result
     }
 
-    /** 三条路径找 Content 对应的 PID */
+    /** 多条路径找 Content 对应的 PID */
     fun extractPidFromContent(content: Content, twm: TerminalToolWindowManager): Long? {
-        // 一次性诊断 log：content 类、component 类、widget 类
         diag(content, twm)
 
-        // 路径 A: 经 resolveWidget（twm.getWidgetByContent）
-        val widget = runCatching {
+        // 路径 A1: findWidgetByContent（新 API，return TerminalWidget interface，支持 reworked）
+        runCatching {
+            val m = twm.javaClass.methods.firstOrNull {
+                it.name == "findWidgetByContent" && it.parameterCount == 1
+            }
+            val widget = m?.invoke(twm, content)
+            if (widget != null) {
+                diagWidget(widget)
+                PidEnvLookup.extractPid(widget)?.let { return it }
+            }
+        }
+
+        // 路径 A2: getWidgetByContent（旧 API，可能返回 null 对 reworked widget）
+        runCatching {
             val m = twm.javaClass.methods.firstOrNull {
                 it.name == "getWidgetByContent" && it.parameterCount == 1
             }
-            m?.invoke(twm, content)
-        }.getOrNull()
-        if (widget != null) {
-            PidEnvLookup.extractPid(widget)?.let { return it }
+            val widget = m?.invoke(twm, content)
+            if (widget != null) {
+                PidEnvLookup.extractPid(widget)?.let { return it }
+            }
         }
 
-        // 路径 B: content.component（Swing 组件本身可能就是 widget）
+        // 路径 B: content.component
         val comp = content.component
         if (comp != null) {
             PidEnvLookup.extractPid(comp)?.let { return it }
@@ -73,6 +84,19 @@ object ContentFinder {
         }
 
         return null
+    }
+
+    @Volatile private var diagWidgetDone: MutableSet<String> = mutableSetOf()
+
+    private fun diagWidget(widget: Any) {
+        val cls = widget.javaClass.name
+        if (diagWidgetDone.add(cls)) {
+            val methods = widget.javaClass.methods
+                .filter { it.parameterCount == 0 && it.returnType != Void.TYPE }
+                .map { "${it.name}:${it.returnType.simpleName}" }
+                .sorted().take(60).joinToString(", ")
+            log.info("[ClaudeNotifier] DIAG TerminalWidget=$cls methods=[$methods]")
+        }
     }
 
     private fun diag(content: Content, twm: TerminalToolWindowManager) {
