@@ -184,13 +184,6 @@ claude-notifier/
 │   │   └── server/                   # HTTP server + 3 handlers
 │   └── src/test/                     # 4 Kotlin 单元测试
 │
-├── docs/
-│   ├── specs/
-│   │   ├── 2026-05-27-claude-notifier-design.md          # 整体设计
-│   │   └── 2026-05-27-claude-notifier-implementation-notes.md  # 实施备忘
-│   ├── plans/                        # 3 个实施 plan
-│   └── manual-test-checklist.md
-│
 ├── INSTALL.md                        # 完整安装指南
 └── README.md
 ```
@@ -241,10 +234,7 @@ Swift (app/)      : 30 tests passing
 Kotlin (idea-plugin/) : 4 tests passing
 ```
 
-完整手动 E2E 清单：
-- `docs/manual-test-checklist.md` —— App 层
-- `cc-plugin/tests/manual-test-checklist.md` —— 全链路
-- `idea-plugin/tests/manual-test-checklist.md` —— IDEA plugin
+单元测试覆盖核心逻辑；手动 E2E 验证按 [INSTALL.md](INSTALL.md) 第 4 节走一遍即可。
 
 ---
 
@@ -292,16 +282,6 @@ App 启动后写 `~/.config/claude-notifier/runtime.json` 暴露当前端口；C
 | Claude Code | 任意支持 plugin hooks 的版本 | UserPromptSubmit / Notification / Stop |
 
 不支持 Windows / Linux —— 浮窗依赖 macOS NSPanel。
-
----
-
-## 设计文档
-
-- [设计 spec](docs/specs/2026-05-27-claude-notifier-design.md) — 11 节完整设计（背景 → 架构 → 协议 → UI → 错误处理 → 测试）
-- [实施备忘](docs/specs/2026-05-27-claude-notifier-implementation-notes.md) — 实施过程中的偏差与决策记录
-- [Plan A](docs/plans/2026-05-27-plan-a-macos-app.md) — App 16-task 实施计划
-- [Plan B](docs/plans/2026-05-27-plan-b-cc-plugin.md) — CC plugin 7-task 实施计划
-- [Plan C](docs/plans/2026-05-27-plan-c-idea-plugin.md) — IDEA plugin 9-task 实施计划
 
 ---
 

@@ -69,10 +69,6 @@ echo "exit: $?"     # 必须永远 0
 
 完整 E2E 清单：`cc-plugin/tests/manual-test-checklist.md`。
 
-## 改 spec / plan
-
-仓库里的 `docs/specs/` 和 `docs/plans/` 是历史快照，**不要直接改**。如果实施过程中发现 spec 不准，新增一个 `docs/specs/YYYY-MM-DD-<topic>-implementation-notes.md` 补丁文档，标明覆盖了原 spec 的哪几节。
-
 ## 开新功能前
 
 打 issue 讨论一下设计，避免做完发现方向不对。涉及多组件改动（比如新增一种终端宿主）需要：

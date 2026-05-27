@@ -365,8 +365,8 @@ cd ~/claude-notifier/app && swift run ClaudeNotifier &
 
 ## 7. 进一步
 
-- **手动测试清单**：`docs/manual-test-checklist.md`、`cc-plugin/tests/manual-test-checklist.md`、`idea-plugin/tests/manual-test-checklist.md`
-- **设计文档**：`docs/specs/2026-05-27-claude-notifier-design.md`
-- **实施备忘**：`docs/specs/2026-05-27-claude-notifier-implementation-notes.md`（包含 HTTP API、端口策略、Adapter 矩阵等 ground truth）
+- **架构**：见 [README](README.md) 的"三件套"和"工作流程"两节
+- **HTTP API surface**：App 端口 6789，IDEA plugin 端口 6790；端口被占用会自动 +1 到 6799
+- **端口动态发现**：所有客户端读 `~/.config/claude-notifier/runtime.json` 取当前端口，不要硬编码
 
-有问题去仓库 issue 区，或者直接在群里 @ 我。
+有问题去仓库 issue 区提交。

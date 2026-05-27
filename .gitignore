@@ -7,3 +7,8 @@ build/
 DerivedData/
 xcuserdata/
 *.xcuserstate
+
+# 内部文档不公开（设计 spec、实施 plan、手动测试清单）
+docs/
+cc-plugin/tests/
+idea-plugin/tests/
