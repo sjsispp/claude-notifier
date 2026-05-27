@@ -8,6 +8,7 @@ import com.intellij.openapi.wm.WindowManager
 import com.intellij.ui.content.Content
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpHandler
+import io.claudenotifier.idea.IdeActivator
 import io.claudenotifier.idea.TerminalTabRegistry
 import org.jetbrains.plugins.terminal.TerminalToolWindowManager
 
@@ -41,9 +42,14 @@ class FocusTabHandler : HttpHandler {
             respond(exchange, 410, Response(false, "project closed")); return
         }
 
+        // 关键：先 fork osascript activate IDE app —— Java JVM 后台进程的
+        // frame.toFront() 在 macOS 上被焦点抢占保护拦截。osascript 是高层
+        // 用户动作，可以绕过限制把 IDE 窗口拉到前台。
+        IdeActivator.activateIdeApp()
+
         var ok = false
         ApplicationManager.getApplication().invokeAndWait {
-            // 1. 提升 IDE 窗口
+            // 1. 提升 IDE 窗口（osascript 主力，这里是兜底）
             val frame = WindowManager.getInstance().getFrame(project)
             frame?.toFront()
             frame?.requestFocus()
