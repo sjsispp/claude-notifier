@@ -26,17 +26,36 @@ object PidEnvLookup {
             log.info("[ClaudeNotifier] widget type=$clsName methods=[$methodNames]")
         }
 
-        // 路径 1: 经典 getTtyConnector
+        // 路径 1: 经典 getTtyConnector，含 BackendTtyConnector unwrap
         runCatching {
             val getTty = widget.javaClass.methods.firstOrNull {
                 it.name == "getTtyConnector" && it.parameterCount == 0
             } ?: return@runCatching
-            val ttyConn = getTty.invoke(widget) ?: return@runCatching
-            val getProc = ttyConn.javaClass.methods.firstOrNull {
-                it.name == "getProcess" && it.parameterCount == 0
-            } ?: return@runCatching
-            val proc = getProc.invoke(ttyConn) as? Process ?: return@runCatching
-            return proc.pid()
+            var ttyConn = getTty.invoke(widget) ?: return@runCatching
+
+            // IntelliJ 2026.1 即使在 classic 下也用 Remote Dev 架构，
+            // ttyConnector 是 BackendTtyConnector 代理，含 getConnector() 包装真正的 connector
+            // 最多剥 3 层避免死循环
+            for (unwrapDepth in 0..3) {
+                val proc = runCatching {
+                    val getProc = ttyConn.javaClass.methods.firstOrNull {
+                        it.name == "getProcess" && it.parameterCount == 0
+                    }
+                    getProc?.invoke(ttyConn) as? Process
+                }.getOrNull()
+                if (proc != null) {
+                    log.info("[ClaudeNotifier] extractPid via getTtyConnector (unwrap depth=$unwrapDepth, class=${ttyConn.javaClass.simpleName}): pid=${proc.pid()}")
+                    return proc.pid()
+                }
+                // 没有 getProcess，try unwrap one layer
+                val inner = runCatching {
+                    ttyConn.javaClass.methods.firstOrNull {
+                        it.name == "getConnector" && it.parameterCount == 0
+                    }?.invoke(ttyConn)
+                }.getOrNull() ?: break
+                if (inner === ttyConn) break
+                ttyConn = inner
+            }
         }
 
         // 路径 2: reworked terminal 可能用 getSession / getModel / getController
