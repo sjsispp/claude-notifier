@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>io.claudenotifier.idea</id>
     <name>Claude Notifier</name>
-    <vendor email="wudazhan@local" url="https://github.com/wudazhan/claude-notifier">wudazhan</vendor>
+    <vendor email="noreply@github.com" url="https://github.com/wudazhan/claude-notifier">wudazhan</vendor>
 
     <description><![CDATA[
         把 IntelliJ 终端的 Claude Code 事件精准送到 ClaudeNotifier.app 浮窗。

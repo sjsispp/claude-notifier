@@ -21,7 +21,7 @@
 ### 方式 B：手动安装（开发者本地）
 
 ```bash
-ln -s /Users/wudazhan/workplace/project/claude-notifier/cc-plugin \
+ln -s ~/claude-notifier/cc-plugin \
       ~/.claude/plugins/claude-notifier
 ```
 
