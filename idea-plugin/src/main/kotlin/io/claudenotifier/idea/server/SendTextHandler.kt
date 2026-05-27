@@ -3,12 +3,9 @@ package io.claudenotifier.idea.server
 import com.google.gson.Gson
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.project.ProjectManager
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpHandler
 import io.claudenotifier.idea.TerminalTabRegistry
-import org.jetbrains.plugins.terminal.ShellTerminalWidget
-import org.jetbrains.plugins.terminal.TerminalToolWindowManager
 
 class SendTextHandler : HttpHandler {
     private val log = Logger.getInstance(SendTextHandler::class.java)
@@ -38,35 +35,61 @@ class SendTextHandler : HttpHandler {
             return
         }
 
-        // 找到 entry.projectPath 对应的 Project，遍历其 terminal widgets
-        val project = ProjectManager.getInstance().openProjects.firstOrNull {
-            it.basePath == entry.projectPath || it.name == entry.projectName
-        } ?: run {
-            respond(exchange, 410, Response(false, "project closed"))
+        val widgetRef = entry.widgetRef ?: run {
+            respond(exchange, 410, Response(false, "widget not yet attached (tab may have been created before plugin loaded)"))
             return
         }
 
-        // 遍历所有 terminal widget，挑环境变量含 CLAUDE_IDEA_TAB_ID=<tabId> 的那个
         var sent = false
+        var lastError: String? = null
         ApplicationManager.getApplication().invokeAndWait {
-            val twm = TerminalToolWindowManager.getInstance(project)
-            for (widget in twm.terminalWidgets) {
-                val shell = runCatching { ShellTerminalWidget.asShellJediTermWidget(widget) }.getOrNull()
-                val env = runCatching { shell?.startupOptions?.envVariables }.getOrNull() ?: continue
-                if (env["CLAUDE_IDEA_TAB_ID"] == tabId) {
-                    try {
-                        widget.sendCommandToExecute(text.trimEnd('\n'))
-                        sent = true
-                        break
-                    } catch (e: Exception) {
-                        log.warn("sendCommandToExecute failed: ${e.message}")
-                    }
-                }
-            }
+            sent = trySendText(widgetRef, text) { lastError = it }
         }
 
         if (sent) respond(exchange, 200, Response(true))
-        else respond(exchange, 410, Response(false, "matching widget not found"))
+        else respond(exchange, 500, Response(false, lastError ?: "send failed"))
+    }
+
+    /** 多种 API 尝试发字符到 widget；返回是否成功 */
+    private fun trySendText(widgetRef: Any, text: String, errorSink: (String) -> Unit): Boolean {
+        val cleanText = text.trimEnd('\n')
+
+        // 路径 1: 反射调任何 widget 的 sendCommandToExecute(String)
+        runCatching {
+            val m = widgetRef.javaClass.methods.firstOrNull {
+                it.name == "sendCommandToExecute" && it.parameterCount == 1 &&
+                    it.parameterTypes[0] == String::class.java
+            }
+            if (m != null) {
+                m.invoke(widgetRef, cleanText)
+                return true
+            }
+        }.onFailure { log.warn("sendCommandToExecute reflective call failed: ${it.message}") }
+
+        // 路径 2: 反射拿 ttyConnector 写字符
+        runCatching {
+            val ttyMethod = widgetRef.javaClass.methods.firstOrNull {
+                it.name == "getTtyConnector" && it.parameterCount == 0
+            }
+            val ttyConnector = ttyMethod?.invoke(widgetRef) ?: return@runCatching
+            // 优先 String 形式
+            ttyConnector.javaClass.methods.firstOrNull {
+                it.name == "write" && it.parameterCount == 1 && it.parameterTypes[0] == String::class.java
+            }?.let {
+                it.invoke(ttyConnector, cleanText + "\n")
+                return true
+            }
+            // ByteArray 形式
+            ttyConnector.javaClass.methods.firstOrNull {
+                it.name == "write" && it.parameterCount == 1 && it.parameterTypes[0] == ByteArray::class.java
+            }?.let {
+                it.invoke(ttyConnector, (cleanText + "\n").toByteArray(Charsets.UTF_8))
+                return true
+            }
+        }.onFailure { log.warn("ttyConnector write failed: ${it.message}") }
+
+        errorSink("no send-text API works on widget type ${widgetRef.javaClass.name}")
+        return false
     }
 
     private fun respond(exchange: HttpExchange, code: Int, body: Response) {

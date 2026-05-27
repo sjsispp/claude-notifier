@@ -2,15 +2,17 @@ package io.claudenotifier.idea.server
 
 import com.google.gson.Gson
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.wm.WindowManager
+import com.intellij.ui.content.Content
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpHandler
 import io.claudenotifier.idea.TerminalTabRegistry
-import org.jetbrains.plugins.terminal.ShellTerminalWidget
 import org.jetbrains.plugins.terminal.TerminalToolWindowManager
 
 class FocusTabHandler : HttpHandler {
+    private val log = Logger.getInstance(FocusTabHandler::class.java)
     private val gson = Gson()
 
     data class Request(val tabId: String?)
@@ -50,28 +52,39 @@ class FocusTabHandler : HttpHandler {
             val twm = TerminalToolWindowManager.getInstance(project)
             twm.toolWindow.show {}
 
-            // 3. 选中匹配 tabId 的 widget（与 SendTextHandler 相同的查找逻辑）
-            for (widget in twm.terminalWidgets) {
-                val shell = runCatching { ShellTerminalWidget.asShellJediTermWidget(widget) }.getOrNull()
-                val env = runCatching { shell?.startupOptions?.envVariables }.getOrNull() ?: continue
-                if (env["CLAUDE_IDEA_TAB_ID"] == tabId) {
-                    val container = runCatching { twm.getContainer(widget) }.getOrNull()
-                    val content = container?.content
-                    if (content != null) {
-                        twm.toolWindow.contentManager.setSelectedContent(content, true)
-                        widget.requestFocus()
-                        ok = true
-                    } else {
-                        // 兜底：只激活了 tool window 没精准选中 tab；仍算部分成功
-                        ok = true
-                    }
-                    break
-                }
+            // 3. 选中匹配的 tab —— 通过 registry 拿 widgetRef，反射查找它对应的 Content
+            val widgetRef = entry.widgetRef
+            val targetContent: Content? = findContent(widgetRef, twm)
+
+            if (targetContent != null && twm.toolWindow.contentManager.contents.contains(targetContent)) {
+                twm.toolWindow.contentManager.setSelectedContent(targetContent, true)
+                ok = true
+            } else {
+                // 兜底：只激活 tool window，无法精准选中具体 tab
+                log.info("[ClaudeNotifier] focusTab: widget not yet attached (uuid=$tabId), tool window activated only")
+                ok = true
             }
         }
 
         if (ok) respond(exchange, 200, Response(true))
-        else respond(exchange, 410, Response(false, "matching widget not found"))
+        else respond(exchange, 500, Response(false, "focus failed"))
+    }
+
+    /** 反射方式查找 widgetRef 对应的 Content（避免直接 import 不稳定的 widget 类型） */
+    private fun findContent(widgetRef: Any?, twm: TerminalToolWindowManager): Content? {
+        if (widgetRef == null) return null
+        if (widgetRef is Content) return widgetRef
+        // 反射尝试 twm.getContainer(widget).getContent()
+        return runCatching {
+            val getContainer = twm.javaClass.methods.firstOrNull {
+                it.name == "getContainer" && it.parameterCount == 1
+            } ?: return@runCatching null
+            val container = getContainer.invoke(twm, widgetRef) ?: return@runCatching null
+            val getContent = container.javaClass.methods.firstOrNull {
+                it.name == "getContent" && it.parameterCount == 0
+            } ?: return@runCatching null
+            getContent.invoke(container) as? Content
+        }.getOrNull()
     }
 
     private fun respond(exchange: HttpExchange, code: Int, body: Response) {
