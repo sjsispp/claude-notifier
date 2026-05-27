@@ -20,22 +20,40 @@ final class ITermAdapterTests: XCTestCase {
         return NotificationItem(payload: try! JSONDecoder().decode(HookPayload.self, from: json))
     }
 
-    func test_jump_buildsScriptContainingSessionId() async throws {
+    // MARK: - 关键 bugfix: ITERM_SESSION_ID 环境变量是 "wXtYpZ:UUID" 格式，
+    // 但 iTerm AppleScript `id of session` 只返回 UUID。必须剥前缀，否则
+    // `id of s contains "<env_id>"` 永远 false（短串不可能 contains 长串）。
+
+    func test_jump_stripsItermSessionIdPrefix_andUsesUUID() async throws {
         let mock = MockAppleScriptRunner()
         let a = ITermAdapter(runner: mock)
-        try await a.jump(item: item(itermId: "w0t1p0:UUID"))
+        try await a.jump(item: item(itermId: "w0t2p0:776C9868-49B3-4DE5-947F-18238A996DE5"))
         XCTAssertEqual(mock.captured.count, 1)
-        XCTAssertTrue(mock.captured[0].contains("w0t1p0:UUID"))
-        XCTAssertTrue(mock.captured[0].contains("iTerm"))
+        let script = mock.captured[0]
+        XCTAssertTrue(script.contains("776C9868-49B3-4DE5-947F-18238A996DE5"),
+                      "Script should embed the raw UUID")
+        XCTAssertFalse(script.contains("w0t2p0:"),
+                       "Script must strip iTerm window/tab/pane prefix; iTerm's session id is the UUID only")
+        XCTAssertTrue(script.contains("iTerm"))
     }
 
-    func test_approve_writesText1ToSession() async throws {
+    func test_approve_stripsItermSessionIdPrefix_andUsesUUID() async throws {
         let mock = MockAppleScriptRunner()
         let a = ITermAdapter(runner: mock)
-        try await a.approve(item: item(itermId: "w0t1p0:UUID"))
+        try await a.approve(item: item(itermId: "w0t2p0:776C9868-49B3-4DE5-947F-18238A996DE5"))
         XCTAssertEqual(mock.captured.count, 1)
-        XCTAssertTrue(mock.captured[0].contains("w0t1p0:UUID"))
-        XCTAssertTrue(mock.captured[0].contains(#"write text "1""#))
+        let script = mock.captured[0]
+        XCTAssertTrue(script.contains("776C9868-49B3-4DE5-947F-18238A996DE5"))
+        XCTAssertFalse(script.contains("w0t2p0:"))
+        XCTAssertTrue(script.contains(#"write text "1""#))
+    }
+
+    func test_jump_acceptsPlainUUID_withoutPrefix() async throws {
+        // 容错：如果 hook 已经传裸 UUID（无前缀），也要 work
+        let mock = MockAppleScriptRunner()
+        let a = ITermAdapter(runner: mock)
+        try await a.jump(item: item(itermId: "PLAIN-UUID-NO-COLON"))
+        XCTAssertTrue(mock.captured[0].contains("PLAIN-UUID-NO-COLON"))
     }
 
     func test_jump_throwsWhenItermSessionIdMissing() async {
