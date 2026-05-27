@@ -75,11 +75,27 @@ object ContentFinder {
     private fun walkComponentTree(comp: Any, depth: Int): Long? {
         if (depth > 6) return null
 
-        // 一次性 log 树形结构（每种 class 只打一次）
         diagTreeNode(comp, depth)
 
         // 试这个 component 本身
         PidEnvLookup.extractPid(comp)?.let { return it }
+
+        // 关键：如果是内部类（含 $），挖出 this$0 拿外部类实例
+        if (comp.javaClass.name.contains("$")) {
+            runCatching {
+                val outerField = comp.javaClass.declaredFields.firstOrNull { it.name == "this\$0" }
+                if (outerField != null) {
+                    outerField.isAccessible = true
+                    val outer = outerField.get(comp)
+                    if (outer != null) {
+                        diagOuter(outer, depth)
+                        PidEnvLookup.extractPid(outer)?.let { return it }
+                        // 也走 outer 的 getter
+                        walkObjectGetters(outer, depth + 1)?.let { return it }
+                    }
+                }
+            }
+        }
 
         // 递归子组件
         if (comp is java.awt.Container) {
@@ -90,20 +106,41 @@ object ContentFinder {
             } catch (_: Throwable) {}
         }
 
-        // 也试 component 上叫 getXxx 的方法（widget 可能挂在 panel 的某个 service 字段上）
-        for (m in comp.javaClass.methods) {
+        walkObjectGetters(comp, depth)?.let { return it }
+        return null
+    }
+
+    private fun walkObjectGetters(obj: Any, depth: Int): Long? {
+        for (m in obj.javaClass.methods) {
             if (m.parameterCount != 0) continue
             val name = m.name
-            // 只查可能持有 widget / session 的 getter
             if (name !in setOf("getTerminalWidget", "getWidget", "getSession",
                     "getTerminalSession", "getModel", "getController", "getPanel",
-                    "getTerminalPanel", "getView", "getJBTerminalWidget")) continue
+                    "getTerminalPanel", "getView", "getJBTerminalWidget",
+                    "getActiveOutputModel", "getOutputModel", "getBackend",
+                    "getTtyConnector", "getProcess", "getShellSession",
+                    "getRunner", "getEditor")) continue
             runCatching {
-                val v = m.invoke(comp) ?: return@runCatching
-                walkComponentTree(v, depth + 1)?.let { return it }
+                val v = m.invoke(obj) ?: return@runCatching
+                if (v is Process) return v.pid()
+                PidEnvLookup.extractPid(v)?.let { return it }
+                if (depth < 6) walkObjectGetters(v, depth + 1)?.let { return it }
             }
         }
         return null
+    }
+
+    @Volatile private var diagOuterDone: MutableSet<String> = mutableSetOf()
+
+    private fun diagOuter(obj: Any, depth: Int) {
+        val cls = obj.javaClass.name
+        if (diagOuterDone.add(cls)) {
+            val methods = obj.javaClass.methods
+                .filter { it.parameterCount == 0 && it.returnType != Void.TYPE }
+                .map { "${it.name}:${it.returnType.simpleName}" }
+                .sorted().take(50).joinToString(", ")
+            log.info("[ClaudeNotifier] OUTER depth=$depth cls=$cls methods=[$methods]")
+        }
     }
 
     @Volatile private var diagTreeDone: MutableSet<String> = mutableSetOf()
