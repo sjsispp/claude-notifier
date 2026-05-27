@@ -14,6 +14,8 @@ final class ClaudeNotifierApp: NSObject, NSApplicationDelegate {
     private var server: HookEndpointServer!
     private var menuBar: MenuBarController!
     private var runtimeConfig: RuntimeConfig!
+    private var router: TerminalRouter!
+    private var floatingPanel: FloatingPanelController!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         store = NotificationStore()
@@ -39,5 +41,10 @@ final class ClaudeNotifierApp: NSObject, NSApplicationDelegate {
         }
 
         menuBar = MenuBarController(store: store)
+
+        self.router = TerminalRouter.defaultRouter()
+        let panel = FloatingPanelController(store: store, router: self.router)
+        menuBar.onClick = { panel.toggle() }
+        self.floatingPanel = panel
     }
 }
