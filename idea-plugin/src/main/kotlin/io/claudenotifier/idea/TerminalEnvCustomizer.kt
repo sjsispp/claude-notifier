@@ -4,7 +4,6 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import org.jetbrains.plugins.terminal.LocalTerminalCustomizer
-import org.jetbrains.plugins.terminal.TerminalToolWindowManager
 
 /**
  * 在每个新终端 tab 创建时注入 CLAUDE_IDEA_TAB_ID 环境变量。
@@ -40,44 +39,22 @@ class TerminalEnvCustomizer : LocalTerminalCustomizer() {
 
     private fun scheduleWidgetAttachment(project: Project, uuid: String) {
         ApplicationManager.getApplication().executeOnPooledThread {
-            // 给 IDE 创建 widget 一点时间
-            for (attempt in 1..20) {
-                Thread.sleep(150)
-                if (tryAttach(project, uuid)) {
-                    log.info("[ClaudeNotifier] polling-attached widget for uuid=$uuid (attempt=$attempt)")
+            // Reworked terminal 的 contentAdded 实测延迟 5-15 秒，所以扫 30 秒
+            for (attempt in 1..150) {
+                Thread.sleep(200)
+                if (project.isDisposed) return@executeOnPooledThread
+                var attached = false
+                ApplicationManager.getApplication().invokeAndWait {
+                    attached = WidgetAttachment.tryAttachByContent(project, uuid)
+                }
+                if (attached) {
+                    if (attempt > 1) {
+                        log.info("[ClaudeNotifier] polling-attached for uuid=$uuid at attempt=$attempt")
+                    }
                     return@executeOnPooledThread
                 }
             }
-            log.warn("[ClaudeNotifier] polling failed to attach widget for uuid=$uuid after 20 attempts")
+            log.warn("[ClaudeNotifier] polling gave up for uuid=$uuid after 30s; handler will lazy-attach on demand")
         }
-    }
-
-    private fun tryAttach(project: Project, uuid: String): Boolean {
-        if (project.isDisposed) return false
-        val registry = ApplicationManager.getApplication().getService(TerminalTabRegistry::class.java)
-        if (registry.lookup(uuid)?.widgetRef != null) return true  // 已被 ContentManagerListener 抢先关联
-
-        var attached = false
-        ApplicationManager.getApplication().invokeAndWait {
-            val twm = try {
-                TerminalToolWindowManager.getInstance(project)
-            } catch (e: Throwable) {
-                return@invokeAndWait
-            }
-            val widgets = try {
-                twm.terminalWidgets
-            } catch (e: Throwable) {
-                return@invokeAndWait
-            }
-            if (widgets.isEmpty()) return@invokeAndWait
-
-            val attachedRefs = registry.snapshot().mapNotNull { it.widgetRef }.toSet()
-            val unattached = widgets.firstOrNull { it !in attachedRefs }
-            if (unattached != null) {
-                registry.attachWidget(uuid, unattached)
-                attached = true
-            }
-        }
-        return attached
     }
 }

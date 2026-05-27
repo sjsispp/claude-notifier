@@ -5,7 +5,10 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpHandler
+import com.intellij.openapi.project.ProjectManager
 import io.claudenotifier.idea.TerminalTabRegistry
+import io.claudenotifier.idea.WidgetAttachment
+import org.jetbrains.plugins.terminal.TerminalToolWindowManager
 
 class SendTextHandler : HttpHandler {
     private val log = Logger.getInstance(SendTextHandler::class.java)
@@ -35,15 +38,29 @@ class SendTextHandler : HttpHandler {
             return
         }
 
-        val widgetRef = entry.widgetRef ?: run {
-            respond(exchange, 410, Response(false, "widget not yet attached (tab may have been created before plugin loaded)"))
-            return
+        // 找 project，方便 lazy-attach 和 Content -> Widget 转换
+        val project = ProjectManager.getInstance().openProjects.firstOrNull {
+            it.basePath == entry.projectPath || it.name == entry.projectName
+        } ?: run {
+            respond(exchange, 410, Response(false, "project closed")); return
         }
 
         var sent = false
         var lastError: String? = null
         ApplicationManager.getApplication().invokeAndWait {
-            sent = trySendText(widgetRef, text) { lastError = it }
+            var widgetRef = registry.lookup(tabId)?.widgetRef
+            if (widgetRef == null) {
+                WidgetAttachment.tryAttachByContent(project, tabId)
+                widgetRef = registry.lookup(tabId)?.widgetRef
+            }
+            if (widgetRef == null) {
+                lastError = "widget not attached (tab may have been created before plugin loaded)"
+                return@invokeAndWait
+            }
+            // Content -> Widget 转换（如果 widgetRef 是 Content）
+            val twm = TerminalToolWindowManager.getInstance(project)
+            val actualTarget = WidgetAttachment.resolveWidget(widgetRef, twm) ?: widgetRef
+            sent = trySendText(actualTarget, text) { lastError = it }
         }
 
         if (sent) respond(exchange, 200, Response(true))

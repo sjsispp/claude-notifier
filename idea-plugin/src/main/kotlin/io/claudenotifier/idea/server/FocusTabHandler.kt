@@ -10,6 +10,7 @@ import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpHandler
 import io.claudenotifier.idea.IdeActivator
 import io.claudenotifier.idea.TerminalTabRegistry
+import io.claudenotifier.idea.WidgetAttachment
 import org.jetbrains.plugins.terminal.TerminalToolWindowManager
 
 class FocusTabHandler : HttpHandler {
@@ -58,8 +59,12 @@ class FocusTabHandler : HttpHandler {
             val twm = TerminalToolWindowManager.getInstance(project)
             twm.toolWindow.show {}
 
-            // 3. 选中匹配的 tab —— 通过 registry 拿 widgetRef，反射查找它对应的 Content
-            val widgetRef = entry.widgetRef
+            // 3. 选中匹配的 tab —— 通过 registry 拿 widgetRef；若没拿到，立刻 lazy-attach 一次
+            var widgetRef = registry.lookup(tabId)?.widgetRef
+            if (widgetRef == null) {
+                WidgetAttachment.tryAttachByContent(project, tabId)
+                widgetRef = registry.lookup(tabId)?.widgetRef
+            }
             val targetContent: Content? = findContent(widgetRef, twm)
 
             if (targetContent != null && twm.toolWindow.contentManager.contents.contains(targetContent)) {
