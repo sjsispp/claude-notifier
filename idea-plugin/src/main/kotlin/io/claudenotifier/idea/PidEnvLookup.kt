@@ -127,6 +127,42 @@ object PidEnvLookup {
     }
 
     /**
+     * 读 PID 和它所有递归子孙进程的 CLAUDE_IDEA_TAB_ID。
+     * 用于：IDE spawn 的 zsh 自己可能被 unset 了 env，但 CC 子进程有。
+     */
+    fun readClaudeTabIdRecursive(rootPid: Long): Set<String> {
+        val result = mutableSetOf<String>()
+        val toVisit = mutableListOf(rootPid)
+        val visited = mutableSetOf<Long>()
+
+        // 先建 ppid → children 映射（一次 ps，避免每个 PID 都调）
+        val children = runCatching {
+            val pb = ProcessBuilder("ps", "-Ao", "pid=,ppid=")
+            pb.redirectErrorStream(true)
+            val proc = pb.start()
+            proc.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)
+            val map = mutableMapOf<Long, MutableList<Long>>()
+            proc.inputStream.bufferedReader().lineSequence().forEach { line ->
+                val parts = line.trim().split(Regex("\\s+"))
+                if (parts.size < 2) return@forEach
+                val pid = parts[0].toLongOrNull() ?: return@forEach
+                val ppid = parts[1].toLongOrNull() ?: return@forEach
+                map.getOrPut(ppid) { mutableListOf() }.add(pid)
+            }
+            map
+        }.getOrNull() ?: emptyMap()
+
+        while (toVisit.isNotEmpty()) {
+            val pid = toVisit.removeAt(0)
+            if (!visited.add(pid)) continue
+            if (visited.size > 50) break  // 防爆
+            readClaudeTabId(pid)?.let { result.add(it) }
+            children[pid]?.let { toVisit.addAll(it) }
+        }
+        return result
+    }
+
+    /**
      * 反向查找：ps 找所有有 CLAUDE_IDEA_TAB_ID=$uuid 的进程，沿 ppid 向上走，
      * 直到找到某 zsh/bash 进程（IDEA 直接 spawn 的 terminal shell）。
      * 返回该 shell PID。

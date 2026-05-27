@@ -28,8 +28,16 @@ object ContentFinder {
                 val contents = runCatching { twm.toolWindow.contentManager.contents.toList() }.getOrNull() ?: continue
                 for (content in contents) {
                     val pid = extractPidFromContent(content, twm) ?: continue
-                    val foundUuid = PidEnvLookup.readClaudeTabId(pid) ?: continue
-                    if (foundUuid == uuid) {
+                    // 先看 PID 本身的 env
+                    val directUuid = PidEnvLookup.readClaudeTabId(pid)
+                    if (directUuid == uuid) {
+                        result = Match(project, content, pid)
+                        return@invokeAndWait
+                    }
+                    // 再看 PID 所有子孙进程的 env（zsh 可能 unset 了，但 CC 子进程还有）
+                    val descendantUuids = PidEnvLookup.readClaudeTabIdRecursive(pid)
+                    if (uuid in descendantUuids) {
+                        log.info("[ClaudeNotifier] matched uuid=$uuid via descendant of pid=$pid")
                         result = Match(project, content, pid)
                         return@invokeAndWait
                     }
